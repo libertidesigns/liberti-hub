@@ -18,7 +18,7 @@
 8. Klikni **Save**
 
 Za pár minut bude appka dostupná na:
-`https://TVOJE-JMENO.github.io/liberti-hub/`
+`https://libertidesigns.github.io/liberti-hub/`
 
 ## Instalace jako aplikace
 
