@@ -124,6 +124,7 @@ function jsonpCall(url,params){
   });
 }
 function apiRead(type){return jsonpCall(API_URL,{action:'read',type:type,t:Date.now()}).then(function(d){return d.data;});}
+function apiReadAll(){return jsonpCall(API_URL,{action:'readAll',t:Date.now()}).then(function(d){return d.data;});}
 function apiWrite(type,data){var enc=encodeURIComponent(JSON.stringify(data));return jsonpCall(API_URL,{action:'write',type:type,data:enc,t:Date.now()});}
 </script>
 <script type="text/babel" data-presets="react">
@@ -358,10 +359,9 @@ function PinLogin({onSuccess}){
     const prefetch=async()=>{
       setPrefetching(true);
       try{
-        const [set,ppl]=await Promise.all([
-          apiRead("settings").catch(()=>null),
-          apiRead("people").catch(()=>null),
-        ]);
+        const all=await apiReadAll().catch(()=>null);
+        const set=all?.settings||null;
+        const ppl=all?.people||null;
         if(set){
           // Ulož VŠECHNY role (system i custom) pro offline přihlašování
           const allRoles=[...(Array.isArray(set.systemRoles)?set.systemRoles:[]),...(Array.isArray(set.customRoles)?set.customRoles:[])];
@@ -7475,15 +7475,15 @@ function App(){
 
   const load=async()=>{
     setLoading(true);setLoadErr("");
-    const safe=p=>p.catch(()=>null);
-    const[inv,cli,tpl,vch,set,proj,tsk,te,exp,inc,bcat,tms,lds,cls,mts,clog,bon,mvs,gls,ppl,oskills]=await Promise.all([
-      safe(apiRead("invoices")),safe(apiRead("clients")),safe(apiRead("templateItems")),safe(apiRead("vouchers")),
-      safe(apiRead("settings")),safe(apiRead("projects")),safe(apiRead("tasks")),safe(apiRead("timeEntries")),
-      safe(apiRead("expenses")),safe(apiRead("incomes")),safe(apiRead("benefitCategories")),safe(apiRead("teams")),
-      safe(apiRead("leads")),safe(apiRead("calls")),safe(apiRead("meetings")),safe(apiRead("changeLog")),
-      safe(apiRead("bonuses")),safe(apiRead("movements")),safe(apiRead("goals")),
-      safe(apiRead("people")),safe(apiRead("orgSkills"))
-    ]);
+    let all=null;
+    try{all=await apiReadAll();}catch(e){all=null;}
+    const g=(k,fallback)=>{if(!all)return null;const v=all[k];return v!==undefined?v:fallback;};
+    const inv=g("invoices",null),cli=g("clients",null),tpl=g("templateItems",null),vch=g("vouchers",null);
+    const set=g("settings",null),proj=g("projects",null),tsk=g("tasks",null),te=g("timeEntries",null);
+    const exp=g("expenses",null),inc=g("incomes",null),bcat=g("benefitCategories",null),tms=g("teams",null);
+    const lds=g("leads",null),cls=g("calls",null),mts=g("meetings",null),clog=g("changeLog",null);
+    const bon=g("bonuses",null),mvs=g("movements",null),gls=g("goals",null);
+    const ppl=g("people",null),oskills=g("orgSkills",null);
     // If core data completely missing AND we have no cached data → show error
     if(!Array.isArray(inv)&&!Array.isArray(cli)&&!inv&&!cli){
       setLoadErr("Nepodařilo se připojit k databázi. Zkontroluj připojení k internetu.");
