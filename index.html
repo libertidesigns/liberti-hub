@@ -6245,6 +6245,8 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
   const [filterOpen,setFilterOpen]=useState(false);
   const [sortOpen,setSortOpen]=useState(false);
   const [expandedId,setExpandedId]=useState(null);
+  const [editDraft,setEditDraft]=useState(null);
+  const saveEdit=()=>{if(!editDraft)return;setTimeEntries(timeEntries.map(x=>x.id===editDraft.id?{...x,...editDraft}:x));setEditDraft(null);};
   const filterRef=useRef(null);
   const sortRef=useRef(null);
   useEffect(()=>{
@@ -6419,7 +6421,7 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
             const persVal=finType==="owner"?compVal:calcEntryCost(e,people);
             const margin=compVal-persVal;
             const persColor=finType==="owner"?C.amber:finType==="freelancer"?C.blue:C.green;
-            const ctxItems=[{sep:true},{l:"Smazat záznam",a:()=>del(e.id),danger:true}];
+            const ctxItems=[...(isAdminHV?[{l:"Upravit záznam",a:()=>setEditDraft({...e})}]:[]),{sep:true},{l:"Smazat záznam",a:()=>del(e.id),danger:true}];
             return <div key={e.id}
               onContextMenu={ev=>openMenu(ev,ctxItems)}
               onClick={()=>handleRowClick(e)}
@@ -6472,7 +6474,64 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
           })}
         </div>;
       })}
-  </div>{CtxMenu}</>;
+  </div>{CtxMenu}
+  {editDraft&&<div style={STY.overlay} onClick={()=>setEditDraft(null)}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.s1,border:`1px solid ${C.bHi}`,borderRadius:6,padding:"28px 32px",maxWidth:520,width:"95%",maxHeight:"90vh",overflowY:"auto",animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)"}}>
+      <div style={{...T.t,fontSize:20,fontWeight:700,letterSpacing:"0.15em",color:C.ivory,marginBottom:22}}>UPRAVIT ZÁZNAM</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 14px",marginBottom:14}}>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Datum</div>
+          <input type="date" value={editDraft.date||""} onChange={e=>setEditDraft(d=>({...d,date:e.target.value}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+        </div>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Osoba</div>
+          <select value={editDraft.personId||""} onChange={e=>setEditDraft(d=>({...d,personId:e.target.value}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
+            {people.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Projekt</div>
+          <select value={editDraft.projectId||""} onChange={e=>setEditDraft(d=>({...d,projectId:e.target.value}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
+            <option value="">Bez projektu</option>
+            {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Čas — <span style={{color:C.ivory}}>{fmtMins(editDraft.minutes||0)}</span></div>
+          <div style={{display:"flex",gap:6}}>
+            <input type="number" min="0" max="23" placeholder="hod" value={Math.floor((editDraft.minutes||0)/60)||""} onChange={e=>setEditDraft(d=>({...d,minutes:Math.max(0,(parseInt(e.target.value)||0)*60+(d.minutes||0)%60)}))} style={{flex:1,background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 10px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none",minWidth:0}}/>
+            <input type="number" min="0" max="59" placeholder="min" value={(editDraft.minutes||0)%60||""} onChange={e=>setEditDraft(d=>({...d,minutes:Math.max(1,Math.floor((d.minutes||0)/60)*60+(parseInt(e.target.value)||0))}))} style={{flex:1,background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 10px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none",minWidth:0}}/>
+          </div>
+        </div>
+      </div>
+      <div style={{marginBottom:12}}>
+        <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Popis</div>
+        <input type="text" value={editDraft.description||""} onChange={e=>setEditDraft(d=>({...d,description:e.target.value}))} placeholder="Popis práce" style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+      </div>
+      <div style={{marginBottom:14}}>
+        <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Nálada</div>
+        <div style={{display:"flex",gap:6}}>
+          {[1,2,3,4,5].map(i=><button key={i} onClick={()=>setEditDraft(d=>({...d,mood:d.mood===i?null:i}))} style={{flex:1,padding:"7px 4px",background:editDraft.mood===i?"rgba(229,57,53,0.12)":"transparent",border:`1px solid ${editDraft.mood===i?C.merlot:C.border}`,borderRadius:4,cursor:"pointer",...T.m,fontSize:8,color:editDraft.mood===i?C.ivory:C.dim,transition:"all .12s",textAlign:"center"}}>{MOODS[i-1].l}</button>)}
+        </div>
+      </div>
+      <div style={{marginBottom:editDraft.taskId?14:20}}>
+        <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Poznámka k úkolu</div>
+        <textarea value={editDraft.taskNote||""} onChange={e=>setEditDraft(d=>({...d,taskNote:e.target.value||null}))} rows={3} placeholder="Poznámka…" style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none",resize:"vertical"}}/>
+      </div>
+      {editDraft.taskId&&<div style={{marginBottom:20}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em"}}>Postup úkolu</div>
+          <div style={{...T.m,fontSize:9,color:C.ivory,fontWeight:600}}>{editDraft.taskProgress||0}%</div>
+        </div>
+        <input type="range" min="0" max="100" step="5" value={editDraft.taskProgress||0} onChange={e=>setEditDraft(d=>({...d,taskProgress:parseInt(e.target.value)}))} className="profile-slider" style={{background:`linear-gradient(to right,${C.merlot} ${editDraft.taskProgress||0}%,${C.s2} ${editDraft.taskProgress||0}%)`}}/>
+      </div>}
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+        <button onClick={()=>setEditDraft(null)} style={{...T.m,background:"transparent",border:`1px solid ${C.bHi}`,borderRadius:4,padding:"9px 18px",cursor:"pointer",fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:C.hi}}>Zrušit</button>
+        <button onClick={saveEdit} style={{...T.m,background:C.merlot,border:"none",borderRadius:4,padding:"9px 18px",cursor:"pointer",fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:C.ivory,fontWeight:500}}>Uložit změny</button>
+      </div>
+    </div>
+  </div>}
+  </>;
 }
 
 // Priorita 1–5 (zpětně kompatibilní se starými string hodnotami)
