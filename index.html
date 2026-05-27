@@ -2206,10 +2206,12 @@ function filterByPeriod(items,dateKey,period){
   });
 }
 function fmtMins(m){if(!m||m===0)return"—";if(m<60)return m+"m";return Math.floor(m/60)+"h"+(m%60?" "+m%60+"m":"");}
-function calcEntryVal(e,people){
-  // Billing rate (revenue) — billingRate is new, falls back to rate for old entries
-  const p=(people||[]).find(x=>x.id===e.personId);
-  const rate=e.billingRate??e.rate??p?.rate??0;
+function calcEntryVal(e,people,projects){
+  // Příjem = čas × hodinová sazba PROJEKTU (ne osobní sazba!)
+  // Pořadí: uložená billingRate na záznamu → sazba projektu → 0
+  const rate=e.billingRate!==undefined&&e.billingRate!==null
+    ?e.billingRate
+    :((projects||[]).find(p=>p.id===e.projectId)?.billingRate??0);
   return Math.round((rate*(e.minutes||0)/60)*10)/10;
 }
 function calcEntryCost(e,people){
@@ -2536,7 +2538,7 @@ function getPersonFinType(person, allRoles){
   return role?.finType||"employee";
 }
 
-function buildFinEntries(invoices,incomes,expenses,timeEntries,settings){
+function buildFinEntries(invoices,incomes,expenses,timeEntries,settings,projects){
   const people=settings?.people||[];
   const entries=[];
 
@@ -2608,7 +2610,7 @@ function buildFinEntries(invoices,incomes,expenses,timeEntries,settings){
     const person=people.find(p=>p.id===te.personId);
     const ft=getPersonFinType(person,allRolesForTE);
     const isOwner=ft==="owner";
-    const val=isOwner?calcEntryVal(te,people):calcEntryCost(te,people);
+    const val=isOwner?calcEntryVal(te,people,projects||[]):calcEntryCost(te,people);
     if(!val)return;
     entries.push({
       id:"te_"+te.id,ref:te.id,
@@ -3207,7 +3209,7 @@ function GoalsView({goals,setGoals,movements,setMovements,settings,confirmFn}){
   </div>;
 }
 
-function FinanceDashboard({invoices,incomes,setIncomes,timeEntries,expenses,setExpenses,settings,period,setPeriod}){
+function FinanceDashboard({invoices,incomes,setIncomes,timeEntries,expenses,setExpenses,settings,period,setPeriod,projects,movements}){
   const [chartPeriod,setChartPeriod]=useState("yearly");
   const [chartType,setChartType]=useState("bar");
   const [capAmount,setCapAmount]=useState("");
@@ -3216,7 +3218,7 @@ function FinanceDashboard({invoices,incomes,setIncomes,timeEntries,expenses,setE
 
   // ── Centrální data: všechny transakce ─────────────────────────
   let allEntries=[];
-  try{allEntries=buildFinEntries(invoices||[],incomes||[],expenses||[],timeEntries||[],settings);}catch(e){console.error("buildFinEntries:",e);}
+  try{allEntries=buildFinEntries(invoices||[],incomes||[],expenses||[],timeEntries||[],settings,projects||[]);}catch(e){console.error("buildFinEntries:",e);}
   const periodEntries=finByPeriod(allEntries,period);
 
   // ── HLAVNÍ METRIKY (všechna data, ne jen za období) ───────────
@@ -3296,15 +3298,28 @@ function FinanceDashboard({invoices,incomes,setIncomes,timeEntries,expenses,setE
     return {p,val,mins};
   }).filter(s=>s.mins>0);
 
-  // ── CEO účty ─────────────────────────────────────────────────────
+  // ── CEO konta ─────────────────────────────────────────────────────
   const allRolesForCEO=[...(settings.systemRoles||[]),...(settings.customRoles||[])];
   const owners=(settings.people||[]).filter(p=>p.active!==false&&getPersonFinType(p,allRolesForCEO)==="owner");
-  const ownerAccounts=owners.map(p=>{
-    // Vklady = hodiny × sazba
-    const contributed=finSum(allEntries.filter(e=>e.personId===p.id&&e.type==="internal"));
-    // Výběry = expense kategorie "Výběr majitele"
-    const withdrawn=finSum(allEntries.filter(e=>e.personId===p.id&&e.type==="expense"&&e.category==="výběr majitele"));
-    return {p, contributed, withdrawn, balance:contributed-withdrawn};
+  const ownerAccountsRaw=owners.map(p=>{
+    // Příjem = hodiny CEO × hodinová sazba projektu
+    const earned=(timeEntries||[])
+      .filter(e=>e.personId===p.id&&!e.isPause)
+      .reduce((s,e)=>s+calcEntryVal(e,null,projects||[]),0);
+    // Vybráno = provedené výběry z firmy kde příjemce = tento CEO
+    const withdrawn=(movements||[])
+      .filter(m=>m.toId===p.id&&m.type==="withdrawal"&&m.status==="done")
+      .reduce((s,m)=>s+(parseFloat(m.amount)||0),0);
+    // Nárok = kolik může vybrat (earned - withdrawn, min 0)
+    const narok=Math.max(0,earned-withdrawn);
+    // Dluh = kolik dluží firmě (pokud vybral více než vydělal)
+    const dluh=Math.max(0,withdrawn-earned);
+    return {p,earned,withdrawn,narok,dluh};
+  });
+  // Pohledávka: dluh druhého CEO přechází jako pohledávka na tohoto CEO
+  const ownerAccounts=ownerAccountsRaw.map((acc,i,arr)=>{
+    const pohledavka=arr.filter((_,j)=>j!==i).reduce((s,o)=>s+o.dluh,0);
+    return {...acc,pohledavka};
   });
 
   return <div className="anim-fadein">
@@ -3468,6 +3483,52 @@ function FinanceDashboard({invoices,incomes,setIncomes,timeEntries,expenses,setE
       </Card>
     </div>
 
+    {ownerAccounts.length>0&&<Card sx={{padding:"14px 20px",marginBottom:12}}>
+      <SH c="CEO konta — nárok na výběr"/>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${ownerAccounts.length},1fr)`,gap:12,marginTop:4}}>
+        {ownerAccounts.map(({p,earned,withdrawn,narok,dluh,pohledavka})=>(
+          <div key={p.id} style={{background:C.s2,borderRadius:6,padding:"14px 16px",border:`1px solid ${dluh>0?C.merlot:narok>0?C.green:C.border}`}}>
+            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:12}}>
+              <div style={{width:8,height:8,borderRadius:"50%",background:p.color||C.amber,flexShrink:0}}/>
+              <span style={{...T.t,fontSize:15,fontWeight:600,letterSpacing:"0.08em",color:C.ivory}}>{p.name}</span>
+            </div>
+            {/* Příjem z hodin */}
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+              <span style={{...T.m,fontSize:FS.s,color:C.dim}}>Příjem z hodin</span>
+              <span style={{...T.t,fontSize:13,fontWeight:300,color:C.blue}}>{FMT(earned)}</span>
+            </div>
+            {/* Vybráno */}
+            <div style={{display:"flex",justifyContent:"space-between",marginBottom:8,paddingBottom:8,borderBottom:`1px solid ${C.border}`}}>
+              <span style={{...T.m,fontSize:FS.s,color:C.dim}}>Vybráno</span>
+              <span style={{...T.t,fontSize:13,fontWeight:300,color:withdrawn>0?C.merlot:C.dim}}>{withdrawn>0?"-"+FMT(withdrawn):"—"}</span>
+            </div>
+            {/* Nárok nebo Dluh */}
+            {dluh>0
+              ?<>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                  <span style={{...T.m,fontSize:FS.s,color:C.merlot,fontWeight:600}}>Dluh</span>
+                  <span style={{...T.t,fontSize:16,fontWeight:600,color:C.merlot}}>−{FMT(dluh)}</span>
+                </div>
+                <div style={{...T.m,fontSize:FS.s,color:C.dim,marginBottom:4}}>Musí nejdříve vyrovnat dluh</div>
+              </>
+              :<div style={{display:"flex",justifyContent:"space-between",marginBottom:4}}>
+                <span style={{...T.m,fontSize:FS.s,color:C.green,fontWeight:600}}>Nárok (může vybrat)</span>
+                <span style={{...T.t,fontSize:16,fontWeight:600,color:C.green}}>{FMT(narok)}</span>
+              </div>
+            }
+            {/* Pohledávka od druhého CEO */}
+            {pohledavka>0&&<div style={{marginTop:8,paddingTop:8,borderTop:`1px dashed ${C.border}`}}>
+              <div style={{display:"flex",justifyContent:"space-between"}}>
+                <span style={{...T.m,fontSize:FS.s,color:C.amber}}>Pohledávka (dluh partnera)</span>
+                <span style={{...T.t,fontSize:13,fontWeight:500,color:C.amber}}>{FMT(pohledavka)}</span>
+              </div>
+              <div style={{...T.m,fontSize:FS.s,color:C.dim,marginTop:2}}>Vykazuje se zvlášť — nárok vznikne po splacení dluhu</div>
+            </div>}
+          </div>
+        ))}
+      </div>
+    </Card>}
+
     <Card sx={{padding:"14px 20px"}}>
       <SH c="Rok po roku"/>
       <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:8}}>
@@ -3568,13 +3629,13 @@ function ExpensesView({expenses,setExpenses,projects,confirmFn}){
 
 
 const MO_FULL=["Leden","Únor","Březen","Duben","Květen","Červen","Červenec","Srpen","Září","Říjen","Listopad","Prosinec"];
-function CashflowView({invoices,expenses,incomes,timeEntries,settings}){
+function CashflowView({invoices,expenses,incomes,timeEntries,settings,projects}){
   const now=new Date(),yr=now.getFullYear(),mo=now.getMonth();
   const [cashPeriod,setCashPeriod]=useState("yearly");
   const [cashType,setCashType]=useState("bar");
   const WEEK_DAYS_CF=["Po","Út","St","Čt","Pá","So","Ne"];
   let allEntries=[];
-  try{allEntries=buildFinEntries(invoices||[],incomes||[],expenses||[],timeEntries||[],settings);}catch(e){console.error("buildFinEntries:",e);}
+  try{allEntries=buildFinEntries(invoices||[],incomes||[],expenses||[],timeEntries||[],settings,projects||[]);}catch(e){console.error("buildFinEntries:",e);}
 
   const buildSlices=()=>{
     if(cashPeriod==="weekly"){
@@ -6303,11 +6364,12 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
   const grouped={};[...filtered].sort(sortFn).forEach(e=>{const d=e.date||"—";if(!grouped[d])grouped[d]=[];grouped[d].push(e);});
   const sortedDates=Object.keys(grouped).sort((a,b)=>sortBy==="date_asc"?a.localeCompare(b):b.localeCompare(a));
   const totalMins=filtered.reduce((s,e)=>s+(e.minutes||0),0);
-  const totalVal=filtered.reduce((s,e)=>s+calcEntryVal(e,people),0);
+  const totalVal=filtered.reduce((s,e)=>s+calcEntryVal(e,people,projects),0);
   const totalPersonVal=filtered.reduce((s,e)=>{
     const person=people.find(p=>p.id===e.personId);
     const ft=getPersonFinType(person,allRolesCombined);
-    return s+(ft==="owner"?calcEntryVal(e,people):calcEntryCost(e,people));
+    // CEO se nepočítá do výplat — má vlastní konto v Přehledu
+    return s+(ft==="owner"?0:calcEntryCost(e,people));
   },0);
   const totalProfit=totalVal-totalPersonVal;
   const today=toDay();
@@ -6389,7 +6451,7 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
       :sortedDates.map(date=>{
         const de=grouped[date];
         const dayMins=de.reduce((s,e)=>s+(e.minutes||0),0);
-        const dayVal=de.reduce((s,e)=>s+calcEntryVal(e,people),0);
+        const dayVal=de.reduce((s,e)=>s+calcEntryVal(e,people,projects),0);
         return <div key={date} style={{marginBottom:16}}>
           {/* Date header */}
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"5px 2px",marginBottom:6,borderBottom:`1px solid ${C.border}`}}>
@@ -6417,8 +6479,9 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
             const delta=Math.max(0,curProg-prevProg);
             // Finance
             const finType=getPersonFinType(person,allRolesCombined);
-            const compVal=calcEntryVal(e,people);
-            const persVal=finType==="owner"?compVal:calcEntryCost(e,people);
+            const compVal=calcEntryVal(e,people,projects);
+            // CEO se nepočítá do výplat — výplata=0, profit=celý příjem
+            const persVal=finType==="owner"?0:calcEntryCost(e,people);
             const margin=compVal-persVal;
             const persColor=finType==="owner"?C.amber:finType==="freelancer"?C.blue:C.green;
             const ctxItems=[...(isAdminHV?[{l:"Upravit záznam",a:()=>setEditDraft({...e})}]:[]),{sep:true},{l:"Smazat záznam",a:()=>del(e.id),danger:true}];
@@ -7933,14 +7996,14 @@ function App(){
           {firmaView==="uspechy"&&<AchievementsView invoices={invoices} incomes={incomes} expenses={expenses} clients={clients} settings={settings} onSaveSettings={d=>{setSet(d);}} isAdmin={isAdmin} confirmFn={confirm}/>}
         </>}
         {module==="finance"&&<>
-          {finView==="overview"&&<FinanceDashboard invoices={invoices} incomes={incomes} setIncomes={setInc} timeEntries={timeEntries} expenses={expenses} setExpenses={setExp} settings={settings} period={finPeriod} setPeriod={setFinPeriod}/>}
+          {finView==="overview"&&<FinanceDashboard invoices={invoices} incomes={incomes} setIncomes={setInc} timeEntries={timeEntries} expenses={expenses} setExpenses={setExp} settings={settings} period={finPeriod} setPeriod={setFinPeriod} projects={projects} movements={movements}/>}
           {finView==="incomes"&&<IncomesView incomes={incomes} setIncomes={setInc} confirmFn={confirm} clients={clients}/>}
           {finView==="expenses"&&<ExpensesView expenses={expenses} setExpenses={setExp} projects={projects} confirmFn={confirm}/>}
           {finView==="pohyby"&&<MovementsView movements={movements} setMovements={setMovements} goals={goals} settings={settings} incomes={incomes} setIncomes={setInc} expenses={expenses} setExpenses={setExp} confirmFn={confirm}/>}
           {finView==="cile"&&<GoalsView goals={goals} setGoals={setGoals} movements={movements} setMovements={setMovements} settings={settings} confirmFn={confirm}/>}
           {finView==="archive"&&<ArchiveView invoices={invoices} settings={settings} onNew={newInv} onEdit={inv=>{setEditing(inv);setFinView("editor");}} onView={inv=>printInv(inv,settings)} onDup={dupInv} onStatus={(id,s)=>setInv(invoices.map(i=>i.id===id?{...i,status:s}:i))} onDelete={id=>setInv(invoices.filter(i=>i.id!==id))} confirmFn={confirm}/>}
           {finView==="editor"&&editing&&<EditorView inv={editing} clients={clients} templateItems={templateItems} vouchers={vouchers} settings={settings} onSave={inv=>{setEditing(inv);saveInv(inv);}} onCancel={()=>setFinView("archive")} onPrint={inv=>printInv(inv,settings)}/>}
-          {finView==="cashflow"&&<CashflowView invoices={invoices} expenses={expenses} incomes={incomes} timeEntries={timeEntries} settings={settings}/>}
+          {finView==="cashflow"&&<CashflowView invoices={invoices} expenses={expenses} incomes={incomes} timeEntries={timeEntries} settings={settings} projects={projects}/>}
         </>}
         {module==="office"&&<>
           {offView==="projects"&&<ProjectsView projects={projects} setProjects={setProj} tasks={tasks} setTasks={setTasks} timeEntries={timeEntries} expenses={expenses} clients={clients} settings={settings} invoices={invoices} onInvoice={invoiceProject} confirmFn={confirm}/>}
