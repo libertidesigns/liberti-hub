@@ -2208,10 +2208,9 @@ function filterByPeriod(items,dateKey,period){
 function fmtMins(m){if(!m||m===0)return"—";if(m<60)return m+"m";return Math.floor(m/60)+"h"+(m%60?" "+m%60+"m":"");}
 function calcEntryVal(e,people,projects){
   // Příjem = čas × hodinová sazba PROJEKTU (ne osobní sazba!)
-  // Pořadí: uložená billingRate na záznamu → sazba projektu → 0
-  const rate=e.billingRate!==undefined&&e.billingRate!==null
-    ?e.billingRate
-    :((projects||[]).find(p=>p.id===e.projectId)?.billingRate??0);
+  // Pokud e.billingRate > 0 → použij ho, jinak vezmi sazbu z projektu
+  const projRate=(projects||[]).find(p=>p.id===e.projectId)?.billingRate??0;
+  const rate=(e.billingRate>0)?e.billingRate:projRate;
   return Math.round((rate*(e.minutes||0)/60)*10)/10;
 }
 function calcEntryCost(e,people){
@@ -6554,7 +6553,7 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
         </div>
         <div>
           <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Projekt</div>
-          <select value={editDraft.projectId||""} onChange={e=>setEditDraft(d=>({...d,projectId:e.target.value}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
+          <select value={editDraft.projectId||""} onChange={e=>{const pid=e.target.value;const projRate=projects.find(p=>p.id===pid)?.billingRate||0;setEditDraft(d=>({...d,projectId:pid,billingRate:projRate||d.billingRate||0}));}} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
             <option value="">Bez projektu</option>
             {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
           </select>
@@ -6570,6 +6569,28 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
       <div style={{marginBottom:12}}>
         <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Popis</div>
         <input type="text" value={editDraft.description||""} onChange={e=>setEditDraft(d=>({...d,description:e.target.value}))} placeholder="Popis práce" style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 14px",marginBottom:14}}>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>
+            Sazba projektu (Kč/h) <span style={{color:C.blue}}>→ Příjem</span>
+          </div>
+          <input type="number" min="0" value={editDraft.billingRate??0} onChange={e=>setEditDraft(d=>({...d,billingRate:parseFloat(e.target.value)||0}))}
+            style={{width:"100%",background:C.s2,border:`1px solid ${C.blue}44`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+          <div style={{...T.m,fontSize:8,color:C.dim,marginTop:3}}>
+            Příjem: {FMT(Math.round(((editDraft.billingRate||0)*(editDraft.minutes||0)/60)*10)/10)} Kč
+          </div>
+        </div>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>
+            Sazba osoby (Kč/h) <span style={{color:C.amber}}>→ Výplata</span>
+          </div>
+          <input type="number" min="0" value={editDraft.rate??people.find(p=>p.id===editDraft.personId)?.rate??0} onChange={e=>setEditDraft(d=>({...d,rate:parseFloat(e.target.value)||0}))}
+            style={{width:"100%",background:C.s2,border:`1px solid ${C.amber}44`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+          <div style={{...T.m,fontSize:8,color:C.dim,marginTop:3}}>
+            Výplata: {FMT(Math.round(((editDraft.rate??people.find(p=>p.id===editDraft.personId)?.rate??0)*(editDraft.minutes||0)/60)*10)/10)} Kč
+          </div>
+        </div>
       </div>
       <div style={{marginBottom:14}}>
         <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Nálada</div>
