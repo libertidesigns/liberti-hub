@@ -6306,18 +6306,40 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
   const [sortOpen,setSortOpen]=useState(false);
   const [expandedId,setExpandedId]=useState(null);
   const [editDraft,setEditDraft]=useState(null);
-  const saveEdit=()=>{if(!editDraft)return;setTimeEntries(timeEntries.map(x=>x.id===editDraft.id?{...x,...editDraft}:x));setEditDraft(null);};
+  const syncTaskProgress=(updatedEntries,taskId)=>{
+    if(!taskId||!setTasks)return;
+    const relevant=updatedEntries
+      .filter(x=>x.taskId===taskId&&!x.isPause&&x.taskProgress!=null)
+      .sort((a,b)=>(a.date||"").localeCompare(b.date||"")||((a.id||"").localeCompare(b.id||"")));
+    const prog=relevant.length>0?relevant[relevant.length-1].taskProgress:null;
+    if(prog==null)return;
+    setTasks(tasks.map(t=>t.id!==taskId?t:{
+      ...t,
+      progress:prog,
+      ...(prog>=100?{status:"Hotovo"}:prog>0?{status:t.status==="Hotovo"?"Probíhá":t.status||"Todo"}:{})
+    }));
+  };
+  const saveEdit=()=>{
+    if(!editDraft)return;
+    const updated=timeEntries.map(x=>x.id===editDraft.id?{...x,...editDraft}:x);
+    setTimeEntries(updated);
+    if(editDraft.taskId)syncTaskProgress(updated,editDraft.taskId);
+    setEditDraft(null);
+  };
   const [newEntry,setNewEntry]=useState(null);
   const openNewEntry=()=>{
     const defPerson=loggedInPerson?.id||people.find(p=>p.active!==false)?.id||"";
-    setNewEntry({personId:defPerson,projectId:"",taskId:"",date:today,minutes:60,description:"",mood:null,billingRate:0,rate:people.find(p=>p.id===defPerson)?.rate||0});
+    setNewEntry({personId:defPerson,projectId:"",taskId:"",date:today,minutes:60,description:"",mood:null,billingRate:0,rate:people.find(p=>p.id===defPerson)?.rate||0,taskProgress:null});
   };
   const saveNewEntry=()=>{
     if(!newEntry||(newEntry.minutes||0)<1)return;
     const person=people.find(p=>p.id===newEntry.personId);
     const rate=newEntry.rate??person?.rate??0;
     const billingRate=newEntry.billingRate>0?newEntry.billingRate:(projects.find(p=>p.id===newEntry.projectId)?.billingRate||0);
-    setTimeEntries([{...newEntry,id:uid(),rate,billingRate,billed:false,isPause:false,taskProgress:null,taskNote:null,noteReadBy:[]},...timeEntries]);
+    const entry={...newEntry,id:uid(),rate,billingRate,billed:false,isPause:false,taskNote:null,noteReadBy:[]};
+    const updated=[entry,...timeEntries];
+    setTimeEntries(updated);
+    if(newEntry.taskId)syncTaskProgress(updated,newEntry.taskId);
     setNewEntry(null);
   };
   const filterRef=useRef(null);
@@ -6631,6 +6653,14 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
           <div style={{...T.m,fontSize:8,color:C.dim,marginTop:3}}>Výplata: {FMT(Math.round(((newEntry.rate||0)*(newEntry.minutes||0)/60)*10)/10)} Kč</div>
         </div>
       </div>
+      {/* Postup úkolu — jen pokud je vybraný úkol */}
+      {newEntry.taskId&&<div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",marginBottom:5}}>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em"}}>Postup úkolu</div>
+          <div style={{...T.m,fontSize:9,color:C.ivory,fontWeight:600}}>{newEntry.taskProgress||0}%</div>
+        </div>
+        <input type="range" min="0" max="100" step="5" value={newEntry.taskProgress||0} onChange={e=>setNewEntry(d=>({...d,taskProgress:parseInt(e.target.value)}))} className="profile-slider" style={{width:"100%",background:`linear-gradient(to right,${C.merlot} ${newEntry.taskProgress||0}%,${C.s2} ${newEntry.taskProgress||0}%)`}}/>
+      </div>}
       {/* Nálada */}
       <div style={{marginBottom:20}}>
         <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Nálada (volitelné)</div>
