@@ -4316,8 +4316,8 @@ function PayrollView({timeEntries,setTimeEntries,settings,confirmFn,authRole,exp
   const {openMenu,CtxMenu}=useCtxMenu();
 
   const getPersonRole=p=>allRoles.find(r=>r.v===p.role);
-  const getUnpaid=pid=>(timeEntries||[]).filter(e=>e.personId===pid&&!e.paid);
-  const getPaid=pid=>(timeEntries||[]).filter(e=>e.personId===pid&&e.paid);
+  const getUnpaid=pid=>(timeEntries||[]).filter(e=>e.personId===pid&&!e.paid&&!e.isPause);
+  const getPaid=pid=>(timeEntries||[]).filter(e=>e.personId===pid&&e.paid&&!e.isPause);
   const getUnpaidBonuses=pid=>(bonuses||[]).filter(b=>b.personId===pid&&!b.paid);
   const getPaidBonuses=pid=>(bonuses||[]).filter(b=>b.personId===pid&&b.paid);
   const calcOwed=p=>{
@@ -6337,8 +6337,12 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
       setTasks(tasks.map(t=>t.id===entry.taskId?{...t,progress:newProg}:t));
     }
   };
+  const getEntryPauses=(e)=>e.taskId
+    ?timeEntries.filter(p=>p.isPause&&p.taskId===e.taskId&&p.date===e.date&&p.personId===e.personId)
+    :[];
   const handleRowClick=(e)=>{
-    if(!e.taskNote){setExpandedId(null);return;}
+    const hasPauses=getEntryPauses(e).length>0;
+    if(!e.taskNote&&!hasPauses){setExpandedId(null);return;}
     const next=expandedId===e.id?null:e.id;
     setExpandedId(next);
     if(next&&isAdminHV&&!(e.noteReadBy||[]).includes(loggedInPerson?.id||"ceo")){
@@ -6466,6 +6470,8 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
             const noteRead=(e.noteReadBy||[]).length>0;
             const hasUnreadNote=hasNote&&!noteRead;
             const isExpanded=expandedId===e.id;
+            const pausesForEntry=getEntryPauses(e);
+            const hasExpandable=hasNote||pausesForEntry.length>0;
             // Progress delta — strict ordering by (date, id) so same-day entries don't cross-contaminate
             const curProg=e.taskProgress||0;
             const prevEntry=taskForE
@@ -6491,7 +6497,7 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
                 border:`1px solid ${hasUnreadNote?C.merlot:isExpanded?C.bHi:C.border}`,
                 borderRadius:5,marginBottom:5,padding:"11px 14px",
                 background:hasUnreadNote?"rgba(229,57,53,0.04)":C.s0,
-                cursor:hasNote?"pointer":"default",
+                cursor:hasExpandable?"pointer":"default",
                 transition:"border-color .2s,background .2s",
                 animation:"fadeIn .18s ease"
               }}>
@@ -6527,10 +6533,24 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
                   <span style={{fontFamily:"'Teko',sans-serif",fontSize:18,fontWeight:400,color:col.c,lineHeight:1.1}}>{col.v}</span>
                 </div>)}
               </div>
-              {/* Expanded note */}
-              {isExpanded&&hasNote&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`,animation:"fadeIn .15s ease"}}>
-                <div style={{...T.m,fontSize:8,color:C.dim,letterSpacing:"0.1em",marginBottom:5,textTransform:"uppercase"}}>Poznámka</div>
-                <div style={{...T.m,fontSize:FS.b,color:C.hi,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{e.taskNote}</div>
+              {/* Expanded: poznámka + pauzy */}
+              {isExpanded&&hasExpandable&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.border}`,animation:"fadeIn .15s ease",display:"flex",flexDirection:"column",gap:10}}>
+                {hasNote&&<div>
+                  <div style={{...T.m,fontSize:8,color:C.dim,letterSpacing:"0.1em",marginBottom:5,textTransform:"uppercase"}}>Poznámka</div>
+                  <div style={{...T.m,fontSize:FS.b,color:C.hi,lineHeight:1.8,whiteSpace:"pre-wrap"}}>{e.taskNote}</div>
+                </div>}
+                {pausesForEntry.length>0&&<div>
+                  <div style={{...T.m,fontSize:8,color:C.dim,letterSpacing:"0.1em",marginBottom:6,textTransform:"uppercase"}}>
+                    Přestávky — celkem {fmtMins(pausesForEntry.reduce((s,p)=>s+(p.minutes||0),0))}
+                  </div>
+                  {pausesForEntry.map(p=>(
+                    <div key={p.id} style={{display:"flex",alignItems:"center",gap:10,padding:"5px 0",borderBottom:`1px solid ${C.border+"44"}`}}>
+                      <span style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.08em"}}>⏸</span>
+                      <span style={{...T.t,fontSize:14,fontWeight:300,color:C.dim}}>{fmtMins(p.minutes||0)}</span>
+                      <span style={{...T.m,fontSize:FS.s,color:C.dim,flex:1}}>{p.description?.replace(/^\[Přestávka\] /,"")}</span>
+                    </div>
+                  ))}
+                </div>}
               </div>}
             </div>;
           })}
