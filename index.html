@@ -6307,6 +6307,19 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
   const [expandedId,setExpandedId]=useState(null);
   const [editDraft,setEditDraft]=useState(null);
   const saveEdit=()=>{if(!editDraft)return;setTimeEntries(timeEntries.map(x=>x.id===editDraft.id?{...x,...editDraft}:x));setEditDraft(null);};
+  const [newEntry,setNewEntry]=useState(null);
+  const openNewEntry=()=>{
+    const defPerson=loggedInPerson?.id||people.find(p=>p.active!==false)?.id||"";
+    setNewEntry({personId:defPerson,projectId:"",taskId:"",date:today,minutes:60,description:"",mood:null,billingRate:0,rate:people.find(p=>p.id===defPerson)?.rate||0});
+  };
+  const saveNewEntry=()=>{
+    if(!newEntry||(newEntry.minutes||0)<1)return;
+    const person=people.find(p=>p.id===newEntry.personId);
+    const rate=newEntry.rate??person?.rate??0;
+    const billingRate=newEntry.billingRate>0?newEntry.billingRate:(projects.find(p=>p.id===newEntry.projectId)?.billingRate||0);
+    setTimeEntries([{...newEntry,id:uid(),rate,billingRate,billed:false,isPause:false,taskProgress:null,taskNote:null,noteReadBy:[]},...timeEntries]);
+    setNewEntry(null);
+  };
   const filterRef=useRef(null);
   const sortRef=useRef(null);
   useEffect(()=>{
@@ -6384,6 +6397,7 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
         <div style={{...T.t,fontSize:26,fontWeight:700,letterSpacing:"0.15em",color:C.ivory}}>DOCHÁZKA</div>
         <div style={{...T.m,fontSize:FS.b,color:C.dim,marginTop:2}}>Záznamy odpracovaného času</div>
       </div>
+      <Btn ch="+ Přidat záznam" onClick={openNewEntry}/>
     </div>
     {/* Stats — TO-DO style */}
     <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,marginBottom:18}}>
@@ -6557,6 +6571,79 @@ function HoursView({timer,timeEntries,setTimeEntries,projects,tasks,setTasks,set
         </div>;
       })}
   </div>{CtxMenu}
+  {newEntry&&<div style={STY.overlay} onClick={()=>setNewEntry(null)}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.s1,border:`1px solid ${C.bHi}`,borderRadius:6,padding:"28px 32px",maxWidth:520,width:"95%",maxHeight:"90vh",overflowY:"auto",animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)"}}>
+      <div style={{...T.t,fontSize:20,fontWeight:700,letterSpacing:"0.15em",color:C.ivory,marginBottom:22}}>PŘIDAT ZÁZNAM</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 14px",marginBottom:14}}>
+        {/* Datum */}
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Datum</div>
+          <input type="date" value={newEntry.date||""} onChange={e=>setNewEntry(d=>({...d,date:e.target.value}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+        </div>
+        {/* Osoba */}
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Osoba</div>
+          <select value={newEntry.personId||""} onChange={e=>{const pid=e.target.value;const pr=people.find(p=>p.id===pid)?.rate||0;setNewEntry(d=>({...d,personId:pid,rate:pr}));}} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
+            <option value="">— vyber —</option>
+            {people.filter(p=>p.active!==false).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        {/* Projekt */}
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Projekt</div>
+          <select value={newEntry.projectId||""} onChange={e=>{const pid=e.target.value;const br=projects.find(p=>p.id===pid)?.billingRate||0;setNewEntry(d=>({...d,projectId:pid,taskId:"",billingRate:br}));}} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
+            <option value="">— bez projektu —</option>
+            {projects.map(p=><option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+        {/* Úkol */}
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Úkol (volitelné)</div>
+          <select value={newEntry.taskId||""} onChange={e=>setNewEntry(d=>({...d,taskId:e.target.value}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}>
+            <option value="">— bez úkolu —</option>
+            {(tasks||[]).filter(t=>!newEntry.projectId||t.projectId===newEntry.projectId).map(t=><option key={t.id} value={t.id}>{t.title}</option>)}
+          </select>
+        </div>
+        {/* Čas */}
+        <div style={{gridColumn:"1/3"}}>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Čas — <span style={{color:C.ivory}}>{fmtMins(newEntry.minutes||0)}</span></div>
+          <div style={{display:"flex",gap:6}}>
+            <input type="number" min="0" max="23" placeholder="hod" value={Math.floor((newEntry.minutes||0)/60)||""} onChange={e=>setNewEntry(d=>({...d,minutes:Math.max(1,(parseInt(e.target.value)||0)*60+(d.minutes||0)%60)}))} style={{flex:1,background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 10px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+            <input type="number" min="0" max="59" placeholder="min" value={(newEntry.minutes||0)%60||""} onChange={e=>setNewEntry(d=>({...d,minutes:Math.max(1,Math.floor((d.minutes||0)/60)*60+(parseInt(e.target.value)||0))}))} style={{flex:1,background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 10px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+          </div>
+        </div>
+      </div>
+      {/* Popis */}
+      <div style={{marginBottom:12}}>
+        <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Popis</div>
+        <input type="text" value={newEntry.description||""} onChange={e=>setNewEntry(d=>({...d,description:e.target.value}))} placeholder="Co bylo uděláno…" style={{width:"100%",background:C.s2,border:`1px solid ${C.border}`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}} autoFocus/>
+      </div>
+      {/* Sazby */}
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:"12px 14px",marginBottom:14}}>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Sazba projektu (Kč/h) <span style={{color:C.blue}}>→ Příjem</span></div>
+          <input type="number" min="0" value={newEntry.billingRate||0} onChange={e=>setNewEntry(d=>({...d,billingRate:parseFloat(e.target.value)||0}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.blue}44`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+          <div style={{...T.m,fontSize:8,color:C.dim,marginTop:3}}>Příjem: {FMT(Math.round(((newEntry.billingRate||0)*(newEntry.minutes||0)/60)*10)/10)} Kč</div>
+        </div>
+        <div>
+          <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:5}}>Sazba osoby (Kč/h) <span style={{color:C.amber}}>→ Výplata</span></div>
+          <input type="number" min="0" value={newEntry.rate||0} onChange={e=>setNewEntry(d=>({...d,rate:parseFloat(e.target.value)||0}))} style={{width:"100%",background:C.s2,border:`1px solid ${C.amber}44`,borderRadius:4,padding:"8px 12px",color:C.ivory,...T.m,fontSize:FS.b,outline:"none"}}/>
+          <div style={{...T.m,fontSize:8,color:C.dim,marginTop:3}}>Výplata: {FMT(Math.round(((newEntry.rate||0)*(newEntry.minutes||0)/60)*10)/10)} Kč</div>
+        </div>
+      </div>
+      {/* Nálada */}
+      <div style={{marginBottom:20}}>
+        <div style={{...T.m,fontSize:9,color:C.dim,textTransform:"uppercase",letterSpacing:"0.1em",marginBottom:8}}>Nálada (volitelné)</div>
+        <div style={{display:"flex",gap:6}}>
+          {[1,2,3,4,5].map(i=><button key={i} onClick={()=>setNewEntry(d=>({...d,mood:d.mood===i?null:i}))} style={{flex:1,padding:"7px 4px",background:newEntry.mood===i?"rgba(229,57,53,0.12)":"transparent",border:`1px solid ${newEntry.mood===i?C.merlot:C.border}`,borderRadius:4,cursor:"pointer",...T.m,fontSize:8,color:newEntry.mood===i?C.ivory:C.dim,transition:"all .12s",textAlign:"center"}}>{MOODS[i-1].l}</button>)}
+        </div>
+      </div>
+      <div style={{display:"flex",gap:10,justifyContent:"flex-end"}}>
+        <button onClick={()=>setNewEntry(null)} style={{...T.m,background:"transparent",border:`1px solid ${C.bHi}`,borderRadius:4,padding:"9px 18px",cursor:"pointer",fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:C.hi}}>Zrušit</button>
+        <button onClick={saveNewEntry} disabled={!newEntry.personId||(newEntry.minutes||0)<1} style={{...T.m,background:(!newEntry.personId||(newEntry.minutes||0)<1)?C.s2:C.merlot,border:"none",borderRadius:4,padding:"9px 18px",cursor:(!newEntry.personId||(newEntry.minutes||0)<1)?"not-allowed":"pointer",fontSize:10,letterSpacing:"0.14em",textTransform:"uppercase",color:C.ivory,fontWeight:500,opacity:(!newEntry.personId||(newEntry.minutes||0)<1)?0.5:1}}>Uložit záznam</button>
+      </div>
+    </div>
+  </div>}
   {editDraft&&<div style={STY.overlay} onClick={()=>setEditDraft(null)}>
     <div onClick={e=>e.stopPropagation()} style={{background:C.s1,border:`1px solid ${C.bHi}`,borderRadius:6,padding:"28px 32px",maxWidth:520,width:"95%",maxHeight:"90vh",overflowY:"auto",animation:"scaleIn .2s cubic-bezier(.22,1,.36,1)"}}>
       <div style={{...T.t,fontSize:20,fontWeight:700,letterSpacing:"0.15em",color:C.ivory,marginBottom:22}}>UPRAVIT ZÁZNAM</div>
